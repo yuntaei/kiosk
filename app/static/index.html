@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>키오스크</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, "Malgun Gothic", sans-serif; background: #f4f4f6; color: #222; height: 100vh; display: flex; flex-direction: column; user-select: none; }
+  header { background: #d62828; color: #fff; padding: 16px 24px; font-size: 1.6rem; font-weight: 700; }
+  main { flex: 1; display: flex; min-height: 0; }
+  .menu { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .tabs { display: flex; gap: 8px; padding: 12px; overflow-x: auto; }
+  .tab { padding: 14px 24px; border: 0; border-radius: 999px; background: #fff; font-size: 1.1rem; cursor: pointer; white-space: nowrap; }
+  .tab.active { background: #222; color: #fff; }
+  .grid { flex: 1; overflow-y: auto; padding: 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; align-content: start; }
+  .card { background: #fff; border: 0; border-radius: 16px; padding: 24px 12px; font-size: 1.1rem; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+  .card:active { transform: scale(.97); }
+  .card .price { display: block; margin-top: 8px; color: #d62828; font-weight: 700; }
+  .card.soldout { opacity: .45; cursor: not-allowed; }
+  aside { width: 340px; background: #fff; display: flex; flex-direction: column; border-left: 1px solid #ddd; }
+  aside h2 { margin: 0; padding: 16px; font-size: 1.2rem; border-bottom: 1px solid #eee; }
+  .cart { flex: 1; overflow-y: auto; padding: 8px 16px; }
+  .empty { color: #888; text-align: center; margin-top: 40px; }
+  .line { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0; gap: 8px; }
+  .line .name { flex: 1; }
+  .qty { display: flex; align-items: center; gap: 8px; }
+  .qty button { width: 34px; height: 34px; border-radius: 50%; border: 1px solid #ccc; background: #fff; font-size: 1.1rem; cursor: pointer; }
+  .footer { padding: 16px; border-top: 1px solid #eee; }
+  .total { display: flex; justify-content: space-between; font-size: 1.3rem; font-weight: 700; margin-bottom: 12px; }
+  .actions { display: flex; gap: 8px; }
+  .actions button { flex: 1; padding: 16px; border: 0; border-radius: 12px; font-size: 1.1rem; cursor: pointer; }
+  #clear { background: #e5e5e8; }
+  #order { background: #d62828; color: #fff; font-weight: 700; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; }
+  .overlay.show { display: flex; }
+  .modal { background: #fff; border-radius: 20px; padding: 40px 56px; text-align: center; }
+  .modal .num { font-size: 5rem; font-weight: 800; color: #d62828; margin: 8px 0; }
+  .modal button { margin-top: 16px; padding: 14px 40px; border: 0; border-radius: 12px; background: #222; color: #fff; font-size: 1.1rem; cursor: pointer; }
+  @media (max-width: 700px) { main { flex-direction: column; } aside { width: 100%; max-height: 45vh; } }
+</style>
+</head>
+<body>
+<header>🍔 주문하기</header>
+<main>
+  <section class="menu">
+    <div class="tabs" id="tabs"></div>
+    <div class="grid" id="grid"></div>
+  </section>
+  <aside>
+    <h2>장바구니</h2>
+    <div class="cart" id="cart"></div>
+    <div class="footer">
+      <div class="total"><span>합계</span><span id="total">0원</span></div>
+      <div class="actions">
+        <button id="clear">비우기</button>
+        <button id="order">주문하기</button>
+      </div>
+    </div>
+  </aside>
+</main>
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div>주문이 접수되었습니다</div>
+    <div class="num" id="num"></div>
+    <div id="summary"></div>
+    <button id="done">확인</button>
+  </div>
+</div>
+<script>
+const won = n => n.toLocaleString("ko-KR") + "원";
+const $ = id => document.getElementById(id);
+let menu = [], category = null, cart = new Map(); // menu_id -> quantity
+
+async function load() {
+  menu = await (await fetch("/api/menu")).json();
+  category = menu[0]?.category ?? null;
+  renderTabs(); renderGrid(); renderCart();
+}
+
+function renderTabs() {
+  const cats = [...new Set(menu.map(m => m.category))];
+  $("tabs").replaceChildren(...cats.map(c => {
+    const b = document.createElement("button");
+    b.className = "tab" + (c === category ? " active" : "");
+    b.textContent = c;
+    b.onclick = () => { category = c; renderTabs(); renderGrid(); };
+    return b;
+  }));
+}
+
+function renderGrid() {
+  $("grid").replaceChildren(...menu.filter(m => m.category === category).map(m => {
+    const b = document.createElement("button");
+    b.className = "card" + (m.available ? "" : " soldout");
+    b.disabled = !m.available;
+    const name = document.createElement("span");
+    name.textContent = m.name;
+    const price = document.createElement("span");
+    price.className = "price";
+    price.textContent = m.available ? won(m.price) : "품절";
+    b.append(name, price);
+    b.onclick = () => { cart.set(m.id, (cart.get(m.id) ?? 0) + 1); renderCart(); };
+    return b;
+  }));
+}
+
+function renderCart() {
+  const box = $("cart");
+  let total = 0;
+  if (cart.size === 0) {
+    box.innerHTML = '<div class="empty">메뉴를 선택해 주세요</div>';
+  } else {
+    box.replaceChildren(...[...cart].map(([id, q]) => {
+      const m = menu.find(x => x.id === id);
+      total += m.price * q;
+      const row = document.createElement("div");
+      row.className = "line";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = m.name;
+      const qty = document.createElement("span");
+      qty.className = "qty";
+      const minus = document.createElement("button"); minus.textContent = "−";
+      const n = document.createElement("span"); n.textContent = q;
+      const plus = document.createElement("button"); plus.textContent = "+";
+      minus.onclick = () => { q > 1 ? cart.set(id, q - 1) : cart.delete(id); renderCart(); };
+      plus.onclick = () => { cart.set(id, Math.min(q + 1, 99)); renderCart(); };
+      qty.append(minus, n, plus);
+      const sub = document.createElement("span"); sub.textContent = won(m.price * q);
+      row.append(name, qty, sub);
+      return row;
+    }));
+  }
+  $("total").textContent = won(total);
+  $("order").disabled = $("clear").disabled = cart.size === 0;
+}
+
+$("clear").onclick = () => { cart.clear(); renderCart(); };
+
+$("order").onclick = async () => {
+  $("order").disabled = true;
+  try {
+    const res = await fetch("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: [...cart].map(([menu_id, quantity]) => ({ menu_id, quantity })) }),
+    });
+    const body = await res.json();
+    if (!res.ok) { alert(typeof body.detail === "string" ? body.detail : "주문에 실패했습니다."); return; }
+    $("num").textContent = body.number;
+    $("summary").textContent = `총 ${won(body.total)}`;
+    $("overlay").classList.add("show");
+    cart.clear();
+  } catch (e) {
+    alert("서버와 통신할 수 없습니다.");
+  } finally {
+    renderCart();
+  }
+};
+
+$("done").onclick = () => $("overlay").classList.remove("show");
+
+load();
+</script>
+</body>
+</html>
